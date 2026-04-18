@@ -121,19 +121,55 @@ async def cmd_flood_stats(message: Message):
 
 
 @dp.message()
-async def track_messages(message: Message):
-    """Перехват всех сообщений для статистики"""
-    # Игнорируем команды и сообщения от ботов
-    if message.text and message.text.startswith("/"):
-        return
-    if message.from_user.is_bot:
+async def handle_flood_stats_request(message: Message):
+    """Реагирует на текст 'флуд статистика' в любом регистре"""
+    
+    # Проверяем, что это текст и он совпадает (после приведения к нижнему регистру)
+    if not message.text:
         return
     
+    if message.text.strip().lower() != "флуд статистика":
+        return  # Игнорируем другие сообщения
+    
+    # === Дальше — логика показа статистики ===
     chat_id = message.chat.id
-    user_id = message.from_user.id
+    current_week_start = get_week_start_utc()
     
-    reset_week_if_needed(chat_id, user_id)
-    stats_store[chat_id][user_id]["count"] += 1
+    # Фильтруем актуальные данные за текущую неделю
+    chat_stats = {
+        uid: data["count"] 
+        for uid, data in stats_store[chat_id].items() 
+        if data["week_start"] and data["week_start"] >= current_week_start
+    }
+    
+    if not chat_stats:
+        await message.answer("📭 За эту неделю сообщений ещё не было.")
+        return
+    
+    # Сортировка по убыванию
+    sorted_stats = sorted(chat_stats.items(), key=lambda x: x[1], reverse=True)
+    
+    # Формирование ответа
+    lines = ["Статистика за неделю:"]
+    for user_id, count in sorted_stats:
+        try:
+            member = await message.bot.get_chat_member(chat_id, user_id)
+            name = member.user.first_name
+            if member.user.last_name:
+                name += f" {member.user.last_name}"
+            username = member.user.username
+            display_name = f"@{username}" if username else name
+        except:
+            display_name = f"Пользователь {user_id}"
+        lines.append(f"{display_name}: {count}")
+    
+    response = "\n".join(lines)
+    
+    # Обрезка если > 4096 символов (лимит Telegram)
+    if len(response) > 4090:
+        response = response[:4087] + "..."
+    
+    await message.answer(response)
 
 
 # === Запуск для Render (uvicorn) ===
